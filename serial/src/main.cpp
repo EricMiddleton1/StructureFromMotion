@@ -11,6 +11,8 @@
 
 #include "Config.hpp"
 #include "DeviceManager.hpp"
+#include "OrbDetector.hpp"
+#include "EssentialComputer.hpp"
 
 int main(void)
 {
@@ -28,18 +30,55 @@ int main(void)
   auto videoDevice =
     device_cast<VideoDevice>(DeviceManager::build(videoName->second,
   	std::move(videoParams)));
+	
+	auto orbDetector = std::make_unique<ORBDetector>(std::move(config.getParams("feature_detector")));
+
+	auto essentialComputer = std::make_unique<EssentialComputer>(
+		std::move(config.getParams("essential_computer")));
 
 	auto startTime = cv::getTickCount();
+	
+	cv::Mat prevFrame;
+	ORBDetector::Features prevFeatures;
+	bool valid = false;
 
   while(cv::waitKey(1) == -1) {
-
-    cv::Mat frame;
+    cv::Mat frame, display;
 
     //Try to grab frame from video device
     if(!videoDevice->getFrame(frame)) {
       std::cerr << "[Warning] Failed to fetch frame" << std::endl;
       continue;
     }
+
+		display = frame.clone();
+
+		//Detect ORB features
+		auto features = orbDetector->detectKeyPoints(frame);
+
+		if(valid) {
+			//Match features between this frame and the previous frame
+			auto matchedFeatures = orbDetector->matchFeatures(prevFeatures, features);
+			
+			orbDetector->draw(display, matchedFeatures.second);
+
+			//Calculate essential matrix and extract pose
+			cv::Mat r, t;
+			if(essentialComputer->computePose(matchedFeatures.first, matchedFeatures.second,
+				r, t)) {
+
+				std::cout << "[Info] Recovered camera pose:\n" << t << std::endl;
+			}
+			else {
+				std::cout << "[Warning] Could not recover pose" << std::endl;
+			}
+		}
+
+		imshow("Features", display);
+
+		prevFrame = frame.clone();
+		prevFeatures = features;
+		valid = true;
 
     //Stop loop stopwatch
 		auto endTime = cv::getTickCount();
