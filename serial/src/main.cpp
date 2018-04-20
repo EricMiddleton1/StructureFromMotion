@@ -11,8 +11,9 @@
 
 #include "Config.hpp"
 #include "DeviceManager.hpp"
+#include "types.hpp"
 #include "OrbDetector.hpp"
-#include "EssentialComputer.hpp"
+#include "Frame.hpp"
 
 int main(void)
 {
@@ -31,61 +32,51 @@ int main(void)
     device_cast<VideoDevice>(DeviceManager::build(videoName->second,
   	std::move(videoParams)));
 	
-	auto orbDetector = std::make_unique<ORBDetector>(std::move(config.getParams("feature_detector")));
+	SFM::ORBDetector orbDetector{config.getParams("feature_detector")};
 
-	auto essentialComputer = std::make_unique<EssentialComputer>(
-		std::move(config.getParams("essential_computer")));
+  double focal = 1.0;
+  cv::Point2d pp{0., 0.};
 
-	auto startTime = cv::getTickCount();
-	
-	cv::Mat prevFrame;
-	ORBDetector::Features prevFeatures;
-	bool valid = false;
+  std::vector<SFM::Frame> frames;
 
-  while(cv::waitKey(1) == -1) {
-    cv::Mat frame, display;
+  std::cout << "[Info] Loading images and extracting features..." << std::endl;
 
-    //Try to grab frame from video device
-    if(!videoDevice->getFrame(frame)) {
-      std::cerr << "[Warning] Failed to fetch frame" << std::endl;
-      continue;
+  //Phase 1 - Load frames from disk and store in Frame datstructure
+	cv::Mat image;
+  auto startTime = cv::getTickCount();
+  while(videoDevice->getFrame(image)) {
+    //Save frame
+    //This converts the frame to grayscale and
+    //extracts and stores ORB features and descriptors
+    frames.emplace_back(orbDetector, image, focal, pp);
+  }
+
+  auto endTime = cv::getTickCount();
+	std::cout << "[Info] Loaded " << frames.size() << " frames ("
+    << static_cast<float>(endTime - startTime)
+		/ cv::getTickFrequency()*1000.f << "ms)" << std::endl;
+
+  if(frames.empty()) {
+    std::cerr << "[Error] Loaded 0 frames" << std::endl;
+    return 1;
+  }
+  
+  //Loop through every pair of frames to track feature correspondences accross frames
+  for(size_t i = 0; i < (frames.size()-1); ++i) {
+    auto& frame1 = frames[i];
+
+    std::cout << "[" << i << "]: ";
+
+    for(size_t j = i+1; j < frames.size(); ++j) {
+      if(frame1.compare(frames[j])) {
+        std::cout << j << " ";
+      }
     }
+    std::cout << "\n" << std::endl;
 
-		display = frame.clone();
-
-		//Detect ORB features
-		auto features = orbDetector->detectKeyPoints(frame);
-
-		if(valid) {
-			//Match features between this frame and the previous frame
-			auto matchedFeatures = orbDetector->matchFeatures(prevFeatures, features);
-			
-			orbDetector->draw(display, matchedFeatures.second);
-
-			//Calculate essential matrix and extract pose
-			cv::Mat r, t;
-			if(essentialComputer->computePose(matchedFeatures.first, matchedFeatures.second,
-				r, t)) {
-
-				std::cout << "[Info] Recovered camera pose:\n" << t << std::endl;
-			}
-			else {
-				std::cout << "[Warning] Could not recover pose" << std::endl;
-			}
-		}
-
-		imshow("Features", display);
-
-		prevFrame = frame.clone();
-		prevFeatures = features;
-		valid = true;
-
-    //Stop loop stopwatch
-		auto endTime = cv::getTickCount();
-		std::cout << "[Info] Processed frame in " << static_cast<float>(endTime - startTime)
-			/ cv::getTickFrequency()*1000.f << "ms" << std::endl;
-    startTime = endTime;
-
+    auto display = frame1.getImage().clone();
+    cv::imshow("Current Frame", display);
+    cv::waitKey(10);
   }
 
   return 0;

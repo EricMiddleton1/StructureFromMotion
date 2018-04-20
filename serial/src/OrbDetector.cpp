@@ -2,13 +2,14 @@
 
 #include <opencv2/imgproc.hpp>
 
+namespace SFM {
 ORBDetector::ORBDetector(std::vector<Param>&& params)
   : IConfigurable({}, std::move(params))
   , m_extractor{cv::ORB::create()}
 	,	m_matcher{cv::DescriptorMatcher::create("BruteForce-Hamming")} {
 }
 
-ORBDetector::Features ORBDetector::detectKeyPoints(const cv::Mat& frame) {
+Features ORBDetector::detectKeyPoints(const cv::Mat& frame) const {
 	Features result;
 
 	m_extractor->detectAndCompute(frame, cv::noArray(), result.keyPoints, result.descriptors);
@@ -16,8 +17,8 @@ ORBDetector::Features ORBDetector::detectKeyPoints(const cv::Mat& frame) {
 	return result;
 }
 
-std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> ORBDetector::matchFeatures(
-	const Features& features1, const Features& features2) {
+std::pair<Points, Points> ORBDetector::matchFeatures(Features& features1,
+  Features& features2) const {
 	
 	std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> result;
 	std::vector<cv::DMatch> matches;
@@ -30,6 +31,14 @@ std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> ORBDetector::match
 	}
 
 	return result;
+}
+
+cv::Ptr<cv::Feature2D> ORBDetector::getExtractor() {
+  return m_extractor;
+}
+
+cv::Ptr<cv::DescriptorMatcher> ORBDetector::getMatcher() {
+  return m_matcher;
 }
 
 void ORBDetector::draw(cv::Mat& frame, const KeyPoints& keyPoints) {
@@ -49,4 +58,5 @@ void ORBDetector::draw(cv::Mat& frame, const std::vector<cv::Point2f>& keyPoints
 		cv::rectangle(frame, {pt.x + radius, pt.y + radius, 2*radius, 2*radius},
 			cv::Scalar(0, 255, 0));
 	}
+}
 }

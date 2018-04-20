@@ -10,18 +10,16 @@ VideoFileDevice::VideoFileDevice(std::vector<Param>&& params)
 
   cap_.open(getParam("file"));
   if(!cap_.isOpened()) {
-    throw std::runtime_error("VideoFileDevice: Failed to open webcam " + getParam("id"));
+    throw std::runtime_error("VideoFileDevice: Failed to file " + getParam("video file"));
   }
 }
 
 bool VideoFileDevice::getFrame(cv::Mat& out) {
   cap_ >> out;
   if(out.empty()) {
-    cap_.set(cv::CAP_PROP_POS_AVI_RATIO, 0);
-    cap_ >> out;
+    return false;
   }
-
-  if(!out.empty()) {
+  else {
     if(paramExists("max_height")) {
       auto maxHeight = std::stoi(getParam("max_height"));
       if(out.size().height > maxHeight) {
@@ -38,8 +36,5 @@ bool VideoFileDevice::getFrame(cv::Mat& out) {
 		display(out);
 
     return true;
-  }
-  else {
-    return false;
   }
 }

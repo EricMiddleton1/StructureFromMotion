@@ -1,11 +1,7 @@
 video_device:
   name:        video file
-  file:        ../videos/coover_hallway_2.mp4
-  color_mode:  bw
+  file:        ../videos/coover_tla.mp4
   visualizer:  false
 
 feature_detector:
-  
-essential_computer:
-  confidence:    0.999
-  threshold:  1.0
+
