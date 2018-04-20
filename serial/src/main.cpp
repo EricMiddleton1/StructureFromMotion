@@ -61,7 +61,7 @@ int main(void)
     return 1;
   }
   
-  //Loop through every pair of frames to track feature correspondences accross frames
+  //Phase 2 - Loop through every pair of frames to track feature correspondences accross frames
   for(size_t i = 0; i < (frames.size()-1); ++i) {
     auto& frame1 = frames[i];
 
@@ -78,6 +78,61 @@ int main(void)
     cv::imshow("Current Frame", display);
     cv::waitKey(10);
   }
+
+  
+  //Camera Intrinsic Matrix
+  cv::Mat k = cv::Mat::eye(3, 3, CV_64F);
+  k.at<double>(0, 0) = focal;
+  k.at<double>(1, 1) = focal;
+  k.at<double>(0, 2) = pp.x;
+  k.at<double>(1, 2) = pp.y;
+
+
+  //Phase 3 - Recover motion between frames and triangle keypoints 2D->3D
+  cv::Mat T = cv::Mat::eye(4, 4, CV_64F),
+    P = cv::Mat::eye(3, 4, CV_64F);
+
+  for(size_t i = 0; i < frames.size()-1; ++i) {
+    auto& frame1 = frames[i];
+    auto& frame2 = frames[i+1];
+
+    if(frame1.hasKeypoints(frame2)) {
+      const auto& pose = frame1.getPose(frame2);
+      
+      //Perform local transform
+      cv::Mat T{cv::Mat::eye(4, 4, CV_64F)}, localR, localT;
+      localR.copyTo(T(cv::Range(0, 3), cv::Range(0, 3)));
+      localT.copyTo(T(cv::Range(0, 3), cv::Range(3, 4)));
+
+      frame2.T(frame1.getTransformation()*T);
+
+      //Create projection matrix
+      cv::Mat r = frame2.T()(cv::Range(0, 3), cv::Range(0, 3));
+      cv::Mat t = frame2.T()(cv::Range(0, 3), cv::Range(3, 4));
+      cv::Mat P{3, 4, CV_64F};
+      P(cv::Range(0, 3), cv::Range(0, 3)) = r.t();
+      P(cv::Range(0, 3), cv::Range(3, 4)) = -r.t()*t;
+      P = k*P;
+      frame2.P(P);
+
+      //Triangulate points
+      cv::Mat points4D;
+      cv::triangulatePoints(frame1.getProjectionMatrix(), frame2.getProjectionMatrix(),
+        frame1.getKeypoints(frame2), frame2.getKeypoints(frame1), points4D);
+
+      //Scale the triangulated points to match scale with existing 3D landmarks
+      if(i > 0) {
+        double scale = 0.;
+        
+        cv::Point3f frame1Pos{
+          frame1.T().at<double>(0, 3),
+          frame1.T().at<double>(1, 3),
+          frame1.T().at<double>(2, 3)
+        };
+
+        std::vector<cv::Point3f> newPoints, existingPoints;
+
+
 
   return 0;
 }

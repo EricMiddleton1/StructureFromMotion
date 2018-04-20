@@ -11,7 +11,9 @@ Frame::Frame(ORBDetector& detector, const cv::Mat& image, double focal,
   , m_focal{focal}
   , m_pp{pp}
   , m_minMatches{minMatches}
-  , m_features{extractFeatures(image)} {
+  , m_features{extractFeatures(image)}
+  , m_T{cv::Mat::eye(4, 4, CV_64F)}
+  , m_P{cv::Mat::eye(3, 4, CV_64F)} {
 }
 
 const cv::Mat& Frame::getImage() const {

@@ -1,7 +1,8 @@
 video_device:
-  name:        video file
-  file:        ../videos/coover_tla.mp4
-  visualizer:  false
+  name:           image_folder
+  folder_path:    ../images/desk1
+  color_mode:     bw
+  visualizer:     false
 
 feature_detector:
 
