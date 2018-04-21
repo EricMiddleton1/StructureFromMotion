@@ -25,7 +25,7 @@ namespace SFM {
     static void draw(cv::Mat& frame, const std::vector<cv::Point2f>& keyPoints);
 
   private:
-    cv::Ptr<cv::Feature2D> m_extractor;
+    cv::Ptr<cv::AKAZE> m_extractor;
     cv::Ptr<cv::DescriptorMatcher> m_matcher;
   };
 }

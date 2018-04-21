@@ -5,7 +5,7 @@
 namespace SFM {
 ORBDetector::ORBDetector(std::vector<Param>&& params)
   : IConfigurable({}, std::move(params))
-  , m_extractor{cv::ORB::create()}
+  , m_extractor{cv::AKAZE::create()}
 	,	m_matcher{cv::DescriptorMatcher::create("BruteForce-Hamming")} {
 }
 

@@ -25,11 +25,13 @@ namespace SFM {
     const Pose& getPose(const Frame& other) const;
 
     bool hasKeypoints(const Frame& other) const;
-    Points getKeypoints(const Frame& frame) const;
+    size_t countMatchedKeypoints(const Frame& other) const;
+    const std::vector<KeypointID>& getKeypoints(const Frame& frame) const;
+    cv::Point2f keypoint(KeypointID id) const;
 
-    bool hasLandmark(const cv::Point2f& point) const;
-    LandmarkID getLandmark(const cv::Point2f& point) const;
-    void addLandmark(const cv::Point2f& point, LandmarkID id);
+    bool hasLandmark(KeypointID id) const;
+    LandmarkID getLandmark(KeypointID id) const;
+    void addLandmark(KeypointID kpID, LandmarkID lID);
 
     cv::Mat T() const;
     void T(const cv::Mat& t);
@@ -38,9 +40,6 @@ namespace SFM {
     void P(const cv::Mat& p);
 
   private:
-    using Keypoint_idx = size_t;
-
-
     Features extractFeatures(const cv::Mat& image) const;
 
     ORBDetector& m_detector;
@@ -53,11 +52,11 @@ namespace SFM {
     Features m_features;
     std::vector<LandmarkID> m_landmarks;
 
-    std::map<const Frame*, std::vector<Keypoint_idx>> m_keypointMap;//Maps common keypoints to other 
-                                                                  //frame
-    std::map<const Frame*, Pose> m_poseMap;           //Maps pose between this frame and other frame
-    std::map<cv::Point2f, LandmarkID, std::function<bool(const cv::Point2f&, const cv::Point2f&)>>
-      m_landmarkMap;  //Maps point to landmark
+    std::map<const Frame*, std::vector<KeypointID>> m_keypointMap;//Maps common keypoints
+                                                                  //to other frame
+    std::map<const Frame*, Pose> m_poseMap;           //Maps pose between this frame and
+                                                      //other frame
+    std::map<KeypointID, LandmarkID> m_landmarkMap;   //Maps point to landmark
 
     //4x4 pose transformation matrix
     cv::Mat m_T;

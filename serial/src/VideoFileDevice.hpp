@@ -13,4 +13,5 @@ public:
 private:
   static DeviceRegistration registration_;
   cv::VideoCapture cap_;
+  int m_frameCount, m_maxFrameCount;
 };

@@ -6,15 +6,22 @@ DeviceRegistration VideoFileDevice::registration_{{"video file",
   }}};
 
 VideoFileDevice::VideoFileDevice(std::vector<Param>&& params)
-  : VideoDevice({"file"}, std::move(params)) {
+  : VideoDevice({"file"}, std::move(params))
+  , m_frameCount{0}
+  , m_maxFrameCount{std::stoi(getParam("max frames", "-1"))} {
 
   cap_.open(getParam("file"));
   if(!cap_.isOpened()) {
-    throw std::runtime_error("VideoFileDevice: Failed to file " + getParam("video file"));
+    throw std::runtime_error("VideoFileDevice: Failed to file " + getParam("file"));
   }
 }
 
 bool VideoFileDevice::getFrame(cv::Mat& out) {
+  m_frameCount++;
+  if(m_maxFrameCount != -1 && m_frameCount > m_maxFrameCount) {
+    return false;
+  }
+
   cap_ >> out;
   if(out.empty()) {
     return false;

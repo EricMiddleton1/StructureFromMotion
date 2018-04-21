@@ -36,8 +36,8 @@ int main(void)
 	
 	SFM::ORBDetector orbDetector{config.getParams("feature_detector")};
 
-  double focal = 1.0;
-  cv::Point2d pp{0., 0.};
+  double focal = 484;
+  cv::Point2d pp{311.9607, 219.6259};
 
   //Essential datastructures: vector of frames, point cloud
   std::vector<SFM::Frame> frames;
@@ -74,7 +74,8 @@ int main(void)
 
     for(size_t j = i+1; j < i+2/*frames.size()*/; ++j) {
       if(frame1.compare(frames[j])) {
-        std::cout << j << " ";
+        std::cout << j << ": " << frame1.countMatchedKeypoints(frames[j]) << " matches\n";
+        std::cout << frame1.getPose(frames[j]).t << std::endl;
       }
     }
     std::cout << "\n" << std::endl;
@@ -84,7 +85,6 @@ int main(void)
     cv::waitKey(10);
   }
 
-  
   //Camera Intrinsic Matrix
   cv::Mat k = cv::Mat::eye(3, 3, CV_64F);
   k.at<double>(0, 0) = focal;
@@ -103,6 +103,14 @@ int main(void)
 
     if(frame1.hasKeypoints(frame2)) {
       const auto& pose = frame1.getPose(frame2);
+      const auto& kpID1 = frame1.getKeypoints(frame2);
+      const auto& kpID2 = frame2.getKeypoints(frame1);
+
+      std::vector<cv::Point2f> points1, points2;
+      for(size_t j = 0; j < kpID1.size(); ++j) {
+        points1.push_back(frame1.keypoint(kpID1[j]));
+        points2.push_back(frame2.keypoint(kpID2[j]));
+      }
       
       //Perform local transform
       cv::Mat T{cv::Mat::eye(4, 4, CV_64F)}, localR = pose.r, localT = pose.t;
@@ -123,8 +131,7 @@ int main(void)
 
       //Triangulate points
       cv::Mat points4d;
-      cv::triangulatePoints(frame1.P(), frame2.P(),
-        frame1.getKeypoints(frame2), frame2.getKeypoints(frame1), points4d);
+      cv::triangulatePoints(frame1.P(), frame2.P(), points1, points2, points4d);
 
       //Scale the triangulated points to match scale with existing 3D landmarks
       if(i > 0) {
@@ -137,16 +144,14 @@ int main(void)
           frame1.T().at<double>(2, 3)
         };
 
-        //std::cout << "[Info] Finding existing landmarks in frame " << i << std::endl;
+        std::cout << "[Info] Finding existing landmarks in frame " << i << std::endl;
         //Find existing 3D landmarks that are visible in current frame2
         std::vector<cv::Point3f> newPoints, existingPoints;
-        auto frame1Keypoints = frame1.getKeypoints(frame2);
-        for(size_t j = 0; j < frame1Keypoints.size(); ++j) {
-          if(frame1.hasLandmark(frame1Keypoints[j])) {
+        for(size_t j = 0; j < kpID1.size(); ++j) {
+          if(frame1.hasLandmark(kpID1[j])) {
             cv::Point3f pt3d;
-            auto ptID = frame1.getLandmark(frame1Keypoints[j]);
-            auto avgLandmark = pointCloud.getPoint(ptID) /
-              static_cast<float>(pointCloud.getOrder(ptID)-1);
+            auto ptID = frame1.getLandmark(kpID1[j]);
+            auto avgLandmark = pointCloud.getPoint(ptID);
 
             pt3d.x = points4d.at<float>(0, j) / points4d.at<float>(3, j);
             pt3d.y = points4d.at<float>(1, j) / points4d.at<float>(3, j);
@@ -155,16 +160,24 @@ int main(void)
             newPoints.push_back(pt3d);
             existingPoints.push_back(avgLandmark);
           }
+          else {
+            //std::cout << "[Info] Did not find landmark for point " << kpID1[j]
+              //<< std::endl;
+          }
         }
+        
+        if(newPoints.size() < 2) {
+          std::cout << "[Warning] Rejecting frame pair (only " << newPoints.size()
+            << " common landmarks)\n" << std::endl;
 
-        //std::cout << "[Info] Calculating scale factor for 3D landmarks" << std::endl;
-        //std::cout << "[Info] Using " << newPoints.size() << " points" << std::endl;
+          continue;
+        }
+        std::cout << "[Info] Calculating scale factor for 3D landmarks" << std::endl;
+        std::cout << "[Info] Using " << newPoints.size() << " points" << std::endl;
         //Calculate average ratio of distance for all landmark/point matches
         //TODO: Consider using RANSAC here if outliers are a problem
         for(int j = 0; j < newPoints.size()-1; ++j) {
           for(int k = j+1; k < newPoints.size(); ++k) {
-            //std::cout << "[Info] Scale for point (" << j << ", " << k << ") of "
-              //<< newPoints.size() << std::endl;
             double s = cv::norm(existingPoints[j] - existingPoints[k]) /
               cv::norm(newPoints[j] - newPoints[k]);
 
@@ -172,13 +185,14 @@ int main(void)
             ++count;
           }
         }
-        //std::cout << "[Info] Scale total = " << scale << ", from " << count << " landmarks"
-          //<< std::endl;
+        std::cout << "[Info] Scale total = " << scale << ", from " << count
+          << " landmarks" << std::endl;
         //TODO: deal with possible division by zero
         scale /= count;
 
-        //std::cout << "[Info] Frame " << i << " has relative scale " << scale <<
-          //" and " << newPoints.size() << " landmark matches with previous frame" << std::endl;
+        std::cout << "[Info] Frame " << i << " has relative scale " << scale <<
+          " and " << newPoints.size() << " landmark matches with previous frame"
+          << std::endl;
 
 
         //Scale unit translation vector by scale factor and recalculate T, P
@@ -206,24 +220,21 @@ int main(void)
         frame2.P(P);
 
         //Re-triangulate points based on new projection matrix with correct relative scale
-        cv::triangulatePoints(frame1.P(), frame2.P(), 
-          frame1.getKeypoints(frame2), frame2.getKeypoints(frame1), points4d);
+        cv::triangulatePoints(frame1.P(), frame2.P(), points1, points2, points4d);
       }//End of block if(i > 0)
 
       //Loop through matched points and update point cloud, frame landmark maps
-      const auto& f1Keypoints = frame1.getKeypoints(frame2);
-      const auto& f2Keypoints = frame2.getKeypoints(frame1);
-      for(size_t j = 0; j < f1Keypoints.size(); ++j) {
+      for(size_t j = 0; j < kpID1.size(); ++j) {
         cv::Point3f pt3d;
 
         pt3d.x = points4d.at<float>(0, j) / points4d.at<float>(3, j);
         pt3d.y = points4d.at<float>(1, j) / points4d.at<float>(3, j);
         pt3d.z = points4d.at<float>(2, j) / points4d.at<float>(3, j);
 
-        if(frame1.hasLandmark(f1Keypoints[j])) {
+        if(frame1.hasLandmark(kpID1[j])) {
           //Add existing landmark to frame2 landmark map
-          auto id = frame1.getLandmark(f1Keypoints[j]);
-          frame2.addLandmark(f2Keypoints[j], id);
+          auto id = frame1.getLandmark(kpID1[j]);
+          frame2.addLandmark(kpID2[j], id);
 
           //Add new sighting of landmark to point cloud datastructure
           pointCloud.addSighting(id, pt3d);
@@ -237,12 +248,28 @@ int main(void)
           auto id = pointCloud.addPoint(pt3d);
 
           //Add to landmark maps for frame1, frame2
-          frame1.addLandmark(f1Keypoints[j], id);
-          frame2.addLandmark(f2Keypoints[j], id);
-          //std::cout << "[Info] Added new landmark " << id << std::endl;
+          frame1.addLandmark(kpID1[j], id);
+          frame2.addLandmark(kpID2[j], id);
+          /*
+          std::cout << "[Info] Added new landmark " << kpID2[j];
+          if(frame2.hasLandmark(kpID2[j])) {
+            std::cout << "\tSuccess" << std::endl;
+          }
+          else {
+            std::cout << "\tFailed!" << std::endl;
+          }*/
         }
       }
     }
+  }
+/*
+  for(size_t i = 0; i < frames.size()-1; ++i) {
+    std::cout << frames[i].getPose(frames[i+1]).t << std::endl;
+  }
+*/
+  
+  for(const auto& frame : frames) {
+    std::cout << frame.T() << std::endl;
   }
 
   return 0;

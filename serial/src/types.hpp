@@ -7,6 +7,7 @@ namespace SFM {
 
   using KeyPoints = std::vector<cv::KeyPoint>;
   using Points = std::vector<cv::Point2f>;
+  using KeypointID = size_t;
   using LandmarkID = size_t;
 
   struct Features {
