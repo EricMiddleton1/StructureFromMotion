@@ -3,6 +3,7 @@
 #include <vector>
 #include <utility>
 #include <map>
+#include <functional>
 
 #include <opencv2/features2d.hpp>
 
@@ -24,7 +25,11 @@ namespace SFM {
     const Pose& getPose(const Frame& other) const;
 
     bool hasKeypoints(const Frame& other) const;
-    const Points& getKeypoints(const Frame& frame) const;
+    Points getKeypoints(const Frame& frame) const;
+
+    bool hasLandmark(const cv::Point2f& point) const;
+    LandmarkID getLandmark(const cv::Point2f& point) const;
+    void addLandmark(const cv::Point2f& point, LandmarkID id);
 
     cv::Mat T() const;
     void T(const cv::Mat& t);
@@ -34,6 +39,7 @@ namespace SFM {
 
   private:
     using Keypoint_idx = size_t;
+
 
     Features extractFeatures(const cv::Mat& image) const;
 
@@ -45,10 +51,13 @@ namespace SFM {
     int m_minMatches;
 
     Features m_features;
+    std::vector<LandmarkID> m_landmarks;
 
-    std::map<const Frame*, Points> m_keypointMap;
-    std::map<const Frame*, Pose> m_poseMap;
-    std::map<Keypoint_idx, PointID> m_landmarkMap;
+    std::map<const Frame*, std::vector<Keypoint_idx>> m_keypointMap;//Maps common keypoints to other 
+                                                                  //frame
+    std::map<const Frame*, Pose> m_poseMap;           //Maps pose between this frame and other frame
+    std::map<cv::Point2f, LandmarkID, std::function<bool(const cv::Point2f&, const cv::Point2f&)>>
+      m_landmarkMap;  //Maps point to landmark
 
     //4x4 pose transformation matrix
     cv::Mat m_T;

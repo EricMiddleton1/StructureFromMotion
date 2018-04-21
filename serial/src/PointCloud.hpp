@@ -9,11 +9,11 @@
 namespace SFM {
   class PointCloud {
   public:
-    PointID addPoint(const cv::Point3f& pt);
-    void addSighting(PointID pt);
+    LandmarkID addPoint(const cv::Point3f& pt);
+    void addSighting(LandmarkID pt, const cv::Point3f& newPos);
 
-    cv::Point3f getPoint(PointID pt) const;
-    size_t getOrder(PointID pt) const;
+    cv::Point3f getPoint(LandmarkID pt) const;
+    size_t getOrder(LandmarkID pt) const;
 
   private:
     std::vector<cv::Point3f> m_points;

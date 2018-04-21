@@ -12,6 +12,9 @@ Frame::Frame(ORBDetector& detector, const cv::Mat& image, double focal,
   , m_pp{pp}
   , m_minMatches{minMatches}
   , m_features{extractFeatures(image)}
+  , m_landmarkMap([](const cv::Point2f& p1, const cv::Point2f& p2) {
+      return p1.x < p2.x;
+    })
   , m_T{cv::Mat::eye(4, 4, CV_64F)}
   , m_P{cv::Mat::eye(3, 4, CV_64F)} {
 }
@@ -65,11 +68,14 @@ bool Frame::compare(Frame& other) {
   }
 
   //Move pose into pose map
-  m_poseMap.emplace(&other, std::move(pose));
+  //m_poseMap.emplace(&other, std::move(pose));
+  m_poseMap[&other] = pose;
 
   //Move common keypoints into map
-  m_keypointMap.emplace(&other, std::move(points1));
-  other.m_keypointMap.emplace(this, std::move(points2));
+  //m_keypointMap.emplace(&other, std::move(points1));
+  //other.m_keypointMap.emplace(this, std::move(points2));
+  m_keypointMap[&other] = candidates1;
+  other.m_keypointMap[this] = candidates2;
 
   return true;
 }
@@ -90,8 +96,43 @@ bool Frame::hasKeypoints(const Frame& other) const {
   return m_keypointMap.count(&other) > 0;
 }
 
-const Points& Frame::getKeypoints(const Frame& other) const {
-  return m_keypointMap.at(&other);
+Points Frame::getKeypoints(const Frame& other) const {
+  const auto& indicies = m_keypointMap.at(&other);
+
+  Points p(indicies.size());
+  for(size_t i = 0; i < indicies.size(); ++i) {
+    p[i] = m_features.keyPoints[indicies[i]].pt;
+  }
+
+  return p;
+}
+
+bool Frame::hasLandmark(const cv::Point2f& point) const {
+  return m_landmarkMap.count(point) > 0;
+}
+
+LandmarkID Frame::getLandmark(const cv::Point2f& point) const {
+  return m_landmarkMap.at(point);
+}
+
+void Frame::addLandmark(const cv::Point2f& point, LandmarkID id) {
+  m_landmarkMap[point] = id;
+}
+
+cv::Mat Frame::T() const {
+  return m_T;
+}
+
+void Frame::T(const cv::Mat& t) {
+  m_T = t;
+}
+
+cv::Mat Frame::P() const {
+  return m_P;
+}
+
+void Frame::P(const cv::Mat& p) {
+  m_P = p;
 }
 
 }
