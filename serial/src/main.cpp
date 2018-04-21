@@ -72,7 +72,7 @@ int main(void)
 
     std::cout << "[" << i << "]: ";
 
-    for(size_t j = i+1; j < i+2/*frames.size()*/; ++j) {
+    for(size_t j = i+1; j < frames.size(); ++j) {
       if(frame1.compare(frames[j])) {
         std::cout << j << ": " << frame1.countMatchedKeypoints(frames[j]) << " matches\n";
         std::cout << frame1.getPose(frames[j]).t << std::endl;
@@ -211,9 +211,11 @@ int main(void)
 
         //Make new projection matrix
         //TODO: Make sure this is correct
+        r = frame2.T()(cv::Range(0, 3), cv::Range(0, 3));
+        t = frame2.T()(cv::Range(0, 3), cv::Range(3, 4));
         cv::Mat P(3, 4, CV_64F);
-        P(cv::Range(0, 3), cv::Range(0, 3)) = localR.t();
-        P(cv::Range(0, 3), cv::Range(3, 4)) = -localR.t()*localT;
+        P(cv::Range(0, 3), cv::Range(0, 3)) = r.t();
+        P(cv::Range(0, 3), cv::Range(3, 4)) = -r.t()*t;
         P = k*P;
 
         //Update frame2 projection matrix with correct relative scaling
