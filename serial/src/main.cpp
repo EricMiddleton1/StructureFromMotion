@@ -5,6 +5,7 @@
 
 #include <string>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 
@@ -48,11 +49,11 @@ int main(void)
   //Phase 1 - Load frames from disk and store in Frame datstructure
 	cv::Mat image;
   auto startTime = cv::getTickCount();
-  while(videoDevice->getFrame(image)) {
+  for(size_t i = 0;videoDevice->getFrame(image); ++i) {
     //Save frame
     //This converts the frame to grayscale and
     //extracts and stores ORB features and descriptors
-    frames.emplace_back(orbDetector, image, focal, pp);
+    frames.emplace_back(i, orbDetector, image, focal, pp);
   }
 
   auto endTime = cv::getTickCount();
@@ -75,14 +76,10 @@ int main(void)
     for(size_t j = i+1; j < frames.size(); ++j) {
       if(frame1.compare(frames[j])) {
         std::cout << j << ": " << frame1.countMatchedKeypoints(frames[j]) << " matches\n";
-        std::cout << frame1.getPose(frames[j]).t << std::endl;
+        //std::cout << frame1.getPose(frames[j]).t << std::endl;
       }
     }
-    std::cout << "\n" << std::endl;
-
-    auto display = frame1.getImage().clone();
-    cv::imshow("Current Frame", display);
-    cv::waitKey(10);
+    //std::cout << "\n" << std::endl;
   }
 
   //Camera Intrinsic Matrix
@@ -167,9 +164,10 @@ int main(void)
         }
         
         if(newPoints.size() < 2) {
+          /*
           std::cout << "[Warning] Rejecting frame pair (only " << newPoints.size()
             << " common landmarks)\n" << std::endl;
-
+          */
           continue;
         }
         std::cout << "[Info] Calculating scale factor for 3D landmarks" << std::endl;
@@ -271,8 +269,22 @@ int main(void)
 */
   
   for(const auto& frame : frames) {
-    std::cout << frame.T() << std::endl;
+    std::string name{std::string("frame") + std::to_string(frame.id())};
+
+    //Dump the results to disk
+    std::fstream fFeatures{name + "_features.csv", std::fstream::out},
+      fCovis{name + "_covisibility.csv", std::fstream::out},
+      fLandmarks{name + "_landmarks.csv", std::fstream::out},
+      fPose{name + "_pose.csv", std::fstream::out};
+
+    frame.writeFeatures(fFeatures);
+    frame.writeCovisibility(fCovis);
+    frame.writeLandmarks(fLandmarks);
+    frame.writePose(fPose);
   }
+
+  std::fstream fLandmarks{"landmarks.csv", std::fstream::out};
+  pointCloud.write(fLandmarks);
 
   return 0;
 }

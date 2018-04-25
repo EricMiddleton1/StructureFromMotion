@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <opencv2/core/core.hpp>
+#include <iostream>
 
 #include "Frame.hpp"
 #include "types.hpp"
@@ -14,6 +15,8 @@ namespace SFM {
 
     cv::Point3f getPoint(LandmarkID pt) const;
     size_t getOrder(LandmarkID pt) const;
+
+    void write(std::ostream& stream) const;
 
   private:
     std::vector<cv::Point3f> m_points;

@@ -4,10 +4,11 @@
 #include <opencv2/calib3d.hpp>
 
 namespace SFM {
-Frame::Frame(ORBDetector& detector, const cv::Mat& image, double focal,
+Frame::Frame(size_t id, ORBDetector& detector, const cv::Mat& image, double focal,
   const cv::Vec2d& pp, int minMatches)
-  : m_detector{detector}
-  , m_image{image.clone()}
+  : m_id{id}
+  , m_detector{detector}
+//  , m_image{image.clone()}
   , m_focal{focal}
   , m_pp{pp}
   , m_minMatches{minMatches}
@@ -16,10 +17,15 @@ Frame::Frame(ORBDetector& detector, const cv::Mat& image, double focal,
   , m_P{cv::Mat::eye(3, 4, CV_64F)} {
 }
 
+size_t Frame::id() const {
+  return m_id;
+}
+
+/*
 const cv::Mat& Frame::getImage() const {
   return m_image;
 }
-
+*/
 const Features& Frame::getFeatures() const {
   return m_features;
 }
@@ -150,6 +156,43 @@ cv::Mat Frame::P() const {
 
 void Frame::P(const cv::Mat& p) {
   m_P = p;
+}
+
+void Frame::writeFeatures(std::ostream& stream) const {
+  stream << "feature_id,feature_x,feature_y\n";
+
+  for(size_t i = 0; i < m_features.keyPoints.size(); ++i) {
+    const auto& pt = m_features.keyPoints[i].pt;
+
+    stream << i << ',' << pt.x << ',' << pt.y << '\n';
+  }
+}
+
+void Frame::writeCovisibility(std::ostream& stream) const {
+  stream << "other_frame,my_feature_id,other_feature_id\n";
+
+  for(const auto& entry : m_keypointMap) {
+    const auto& otherFrame = *(entry.first);
+    const auto& myKeypoints = entry.second;
+    const auto& otherKeypoints = otherFrame.m_keypointMap.at(this);
+    
+    for(size_t i = 0; i < myKeypoints.size(); ++i) {
+      stream << otherFrame.id() << ',' << myKeypoints[i] << ','
+        << otherKeypoints[i] << '\n';
+    }
+  }
+}
+
+void Frame::writeLandmarks(std::ostream& stream) const {
+  stream << "feature_id,landmark_id\n";
+
+  for(const auto& entry : m_landmarkMap) {
+    stream << entry.first << ',' << entry.second << '\n';
+  }
+}
+
+void Frame::writePose(std::ostream& stream) const {
+  stream << m_T << '\n';
 }
 
 }

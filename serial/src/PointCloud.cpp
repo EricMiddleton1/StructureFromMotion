@@ -25,4 +25,15 @@ size_t PointCloud::getOrder(LandmarkID pt) const {
   return m_orders[pt];
 }
 
+void PointCloud::write(std::ostream& stream) const {
+  stream << "id,x,y,z,order\n";
+
+  for(size_t i = 0; i < m_points.size(); ++i) {
+    const auto& pt = m_points[i];
+
+    stream << i << ',' << pt.x << ',' << pt.y << ',' << pt.z << ',' << m_orders[i]
+      << '\n' << std::endl;
+  }
+}
+
 }

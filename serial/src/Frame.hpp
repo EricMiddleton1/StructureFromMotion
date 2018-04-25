@@ -13,12 +13,14 @@
 namespace SFM {
   class Frame {
   public:
-    Frame(ORBDetector& detector, const cv::Mat& image, double focal, const cv::Vec2d& pp,
-      int minMatches = 10);
+    Frame(size_t id, ORBDetector& detector, const cv::Mat& image, double focal,
+      const cv::Vec2d& pp, int minMatches = 10);
+
+    size_t id() const;
 
     bool compare(Frame& other);
 
-    const cv::Mat& getImage() const;
+    //const cv::Mat& getImage() const;
     const Features& getFeatures() const;
 
     bool hasPose(const Frame& other) const;
@@ -39,12 +41,19 @@ namespace SFM {
     cv::Mat P() const;
     void P(const cv::Mat& p);
 
+    void writeFeatures(std::ostream& stream) const;
+    void writeCovisibility(std::ostream& stream) const;
+    void writeLandmarks(std::ostream& stream) const;
+    void writePose(std::ostream& stream) const;
+
   private:
     Features extractFeatures(const cv::Mat& image) const;
 
+    size_t m_id;
+
     ORBDetector& m_detector;
 
-    cv::Mat m_image;
+    //cv::Mat m_image;
     double m_focal;
     cv::Vec2d m_pp;
     int m_minMatches;
