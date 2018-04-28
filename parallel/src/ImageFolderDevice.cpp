@@ -6,7 +6,7 @@
 
 DeviceRegistration ImageFolderDevice::registration_{{"image_folder",
   [](std::vector<VideoDevice::Param>&& params) {
-    return std::make_unique<ImageFolderDevice>(std::move(params));
+    return std::unique_ptr<ImageFolderDevice>(new ImageFolderDevice(std::move(params)));
   }}};
 
 ImageFolderDevice::ImageFolderDevice(std::vector<Param>&& params)

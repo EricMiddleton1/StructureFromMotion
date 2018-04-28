@@ -72,15 +72,10 @@ int main(void)
   for(size_t i = 0; i < (frames.size()-1); ++i) {
     auto& frame1 = frames[i];
 
-    std::cout << "[" << i << "]: ";
-
     for(size_t j = i+1; j < frames.size(); ++j) {
       if(frame1.compare(frames[j])) {
-        std::cout << j << ": " << frame1.countMatchedKeypoints(frames[j]) << " matches\n";
-        //std::cout << frame1.getPose(frames[j]).t << std::endl;
       }
     }
-    //std::cout << "\n" << std::endl;
   }
   endTime = cv::getTickCount();
   std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
@@ -146,7 +141,6 @@ int main(void)
           frame1.T().at<double>(2, 3)
         };
 
-        std::cout << "[Info] Finding existing landmarks in frame " << i << std::endl;
         //Find existing 3D landmarks that are visible in current frame2
         std::vector<cv::Point3f> newPoints, existingPoints;
         for(size_t j = 0; j < kpID1.size(); ++j) {
@@ -162,21 +156,11 @@ int main(void)
             newPoints.push_back(pt3d);
             existingPoints.push_back(avgLandmark);
           }
-          else {
-            //std::cout << "[Info] Did not find landmark for point " << kpID1[j]
-              //<< std::endl;
-          }
         }
         
         if(newPoints.size() < 2) {
-          /*
-          std::cout << "[Warning] Rejecting frame pair (only " << newPoints.size()
-            << " common landmarks)\n" << std::endl;
-          */
           continue;
         }
-        std::cout << "[Info] Calculating scale factor for 3D landmarks" << std::endl;
-        std::cout << "[Info] Using " << newPoints.size() << " points" << std::endl;
         //Calculate average ratio of distance for all landmark/point matches
         //TODO: Consider using RANSAC here if outliers are a problem
         for(int j = 0; j < newPoints.size()-1; ++j) {
@@ -188,15 +172,8 @@ int main(void)
             ++count;
           }
         }
-        std::cout << "[Info] Scale total = " << scale << ", from " << count
-          << " landmarks" << std::endl;
         //TODO: deal with possible division by zero
         scale /= count;
-
-        std::cout << "[Info] Frame " << i << " has relative scale " << scale <<
-          " and " << newPoints.size() << " landmark matches with previous frame"
-          << std::endl;
-
 
         //Scale unit translation vector by scale factor and recalculate T, P
         localT *= scale;
@@ -204,8 +181,6 @@ int main(void)
         localR.copyTo(T(cv::Range(0, 3), cv::Range(0, 3)));
         localT.copyTo(T(cv::Range(0, 3), cv::Range(3, 4)));
 
-        std::cout << "[Info] Frame " << i+1 << " position: " << localT << std::endl;
-        
         //Update global frame2 position based on rescaled T
         //TODO: Consider also rescaling relative pose between current frame and previous frame
         //TODO NOTE: It would be useful to calculate this relative pose and scaling factor
@@ -243,8 +218,6 @@ int main(void)
 
           //Add new sighting of landmark to point cloud datastructure
           pointCloud.addSighting(id, pt3d);
-
-          //std::cout << "[Info] Added new sighting of existing landmark " << id << std::endl;
         }
         else {
           //This is a new landmark
@@ -255,14 +228,6 @@ int main(void)
           //Add to landmark maps for frame1, frame2
           frame1.addLandmark(kpID1[j], id);
           frame2.addLandmark(kpID2[j], id);
-          /*
-          std::cout << "[Info] Added new landmark " << kpID2[j];
-          if(frame2.hasLandmark(kpID2[j])) {
-            std::cout << "\tSuccess" << std::endl;
-          }
-          else {
-            std::cout << "\tFailed!" << std::endl;
-          }*/
         }
       }
     }
@@ -270,11 +235,6 @@ int main(void)
   endTime = cv::getTickCount();
   std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
     << "ms" << std::endl;
-/*
-  for(size_t i = 0; i < frames.size()-1; ++i) {
-    std::cout << frames[i].getPose(frames[i+1]).t << std::endl;
-  }
-*/
   
   for(const auto& frame : frames) {
     std::string name{std::string("frame") + std::to_string(frame.id())};

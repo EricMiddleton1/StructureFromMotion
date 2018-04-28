@@ -2,7 +2,7 @@
 
 DeviceRegistration VideoFileDevice::registration_{{"video file",
   [](std::vector<VideoDevice::Param>&& params) {
-    return std::make_unique<VideoFileDevice>(std::move(params));
+    return std::unique_ptr<VideoFileDevice>(new VideoFileDevice(std::move(params)));
   }}};
 
 VideoFileDevice::VideoFileDevice(std::vector<Param>&& params)

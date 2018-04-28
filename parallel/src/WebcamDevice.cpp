@@ -2,7 +2,7 @@
 
 DeviceRegistration WebcamDevice::registration_{{"webcam",
   [](std::vector<VideoDevice::Param>&& params) {
-    return std::make_unique<WebcamDevice>(std::move(params));
+    return std::unique_ptr<WebcamDevice>(new WebcamDevice(std::move(params)));
   }}};
 
 WebcamDevice::WebcamDevice(std::vector<Param>&& params)
