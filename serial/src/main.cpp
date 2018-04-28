@@ -68,6 +68,7 @@ int main(void)
   
   std::cout << "[Info] Tracking features between all pairs of frames" << std::endl;
   //Phase 2 - Loop through every pair of frames to track feature correspondences accross frames
+  startTime = cv::getTickCount();
   for(size_t i = 0; i < (frames.size()-1); ++i) {
     auto& frame1 = frames[i];
 
@@ -81,6 +82,9 @@ int main(void)
     }
     //std::cout << "\n" << std::endl;
   }
+  endTime = cv::getTickCount();
+  std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
+    << "ms" << std::endl;
 
   //Camera Intrinsic Matrix
   cv::Mat k = cv::Mat::eye(3, 3, CV_64F);
@@ -94,6 +98,7 @@ int main(void)
   cv::Mat T = cv::Mat::eye(4, 4, CV_64F),
     P = cv::Mat::eye(3, 4, CV_64F);
 
+  startTime = cv::getTickCount();
   for(size_t i = 0; i < frames.size()-1; ++i) {
     auto& frame1 = frames[i];
     auto& frame2 = frames[i+1];
@@ -262,6 +267,9 @@ int main(void)
       }
     }
   }
+  endTime = cv::getTickCount();
+  std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
+    << "ms" << std::endl;
 /*
   for(size_t i = 0; i < frames.size()-1; ++i) {
     std::cout << frames[i].getPose(frames[i+1]).t << std::endl;

@@ -8,7 +8,6 @@ Frame::Frame(size_t id, ORBDetector& detector, const cv::Mat& image, double foca
   const cv::Vec2d& pp, int minMatches)
   : m_id{id}
   , m_detector{detector}
-//  , m_image{image.clone()}
   , m_focal{focal}
   , m_pp{pp}
   , m_minMatches{minMatches}
@@ -17,17 +16,33 @@ Frame::Frame(size_t id, ORBDetector& detector, const cv::Mat& image, double foca
   , m_P{cv::Mat::eye(3, 4, CV_64F)} {
 }
 
+Frame::Frame(size_t id, ORBDetector& detector, Features&& features, double focal,
+  const cv::Vec2d& pp, int minMatches)
+  : m_id{id}
+  , m_detector{detector}
+  , m_focal{focal}
+  , m_pp{pp}
+  , m_minMatches{minMatches}
+  , m_features{std::move(features)}
+  , m_T{cv::Mat::eye(4, 4, CV_64F)}
+  , m_P{cv::Mat::eye(3, 4, CV_64F)} {
+}
+
+
 size_t Frame::id() const {
   return m_id;
 }
 
-/*
-const cv::Mat& Frame::getImage() const {
-  return m_image;
-}
-*/
 const Features& Frame::getFeatures() const {
   return m_features;
+}
+
+const std::map<const Frame*, std::vector<KeypointID>>& Frame::keypointMap() const {
+  return m_keypointMap;
+}
+
+const std::map<const Frame*, Pose>& Frame::poseMap() const {
+  return m_poseMap;
 }
 
 bool Frame::compare(Frame& other) {
@@ -100,6 +115,16 @@ bool Frame::compare(Frame& other) {
   other.m_keypointMap[this] = inliers2;
 
   return true;
+}
+
+void Frame::addComparison(Frame& other, Pose&& pose, std::vector<KeypointID>&& keypoints1,
+  std::vector<KeypointID>&& keypoints2) {
+  
+  m_poseMap.insert(std::make_pair<const Frame*, Pose>(&other, std::move(pose)));
+  m_keypointMap.insert(std::make_pair<const Frame*, std::vector<KeypointID>>(&other,
+    std::move(keypoints1)));
+  other.m_keypointMap.insert(std::make_pair<const Frame*, std::vector<KeypointID>>(this,
+    std::move(keypoints2)));
 }
 
 Features Frame::extractFeatures(const cv::Mat& image) const {

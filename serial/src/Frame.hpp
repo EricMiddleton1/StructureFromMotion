@@ -13,14 +13,23 @@
 namespace SFM {
   class Frame {
   public:
+    //Construct from image. Extract image features inside constructor
     Frame(size_t id, ORBDetector& detector, const cv::Mat& image, double focal,
+      const cv::Vec2d& pp, int minMatches = 10);
+
+    //Construct from set of features
+    Frame(size_t id, ORBDetector& detector, Features&& features, double focal,
       const cv::Vec2d& pp, int minMatches = 10);
 
     size_t id() const;
 
     bool compare(Frame& other);
+    void addComparison(Frame& other, Pose&& pose, std::vector<KeypointID>&& keypoints1,
+      std::vector<KeypointID>&& keypoints2);
 
-    //const cv::Mat& getImage() const;
+    const std::map<const Frame*, std::vector<KeypointID>>& keypointMap() const;
+    const std::map<const Frame*, Pose>& poseMap() const;
+
     const Features& getFeatures() const;
 
     bool hasPose(const Frame& other) const;
