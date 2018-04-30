@@ -28,6 +28,37 @@ Frame::Frame(size_t id, ORBDetector& detector, Features&& features, double focal
   , m_P{cv::Mat::eye(3, 4, CV_64F)} {
 }
 
+Frame::Frame(const Frame& other)
+	:	m_id{other.m_id}
+	,	m_detector{other.m_detector}
+	,	m_focal{other.m_focal}
+	,	m_pp{other.m_pp}
+	,	m_minMatches{other.m_minMatches}
+	,	m_features{other.m_features}
+	,	m_landmarks{other.m_landmarks}
+	,	m_keypointMap{other.m_keypointMap}
+	,	m_poseMap{other.m_poseMap}
+	,	m_landmarkMap{other.m_landmarkMap}
+	,	m_T{other.m_T}
+	,	m_P{other.m_P} {
+}
+
+Frame& Frame::operator=(const Frame& other) {
+	m_id = other.m_id;
+	m_detector = other.m_detector;
+	m_focal = other.m_focal;
+	m_pp = other.m_pp;
+	m_minMatches = other.m_minMatches;
+	m_features = other.m_features;
+	m_landmarks = other.m_landmarks;
+	m_keypointMap = other.m_keypointMap;
+	m_poseMap = other.m_poseMap;
+	m_landmarkMap = other.m_landmarkMap;
+	m_T = other.m_T;
+	m_P = other.m_P;
+
+	return *this;
+}
 
 size_t Frame::id() const {
   return m_id;
@@ -134,11 +165,21 @@ Features Frame::extractFeatures(const cv::Mat& image) const {
 bool Frame::hasPose(const Frame& other) const {
   return m_poseMap.count(&other) > 0;
 }
-
+/*
+void Frame::setKeypoints(const Frame& other, std::vector<int>&& keypoints) {
+	//m_keypointMap.emplace(std::make_pair<const Frame*, std::vector<int>>(&other,
+		//std::move(keypoints)));
+	m_keypointMap[&other] = keypoints;
+}
+*/
 const Pose& Frame::getPose(const Frame& other) const {
   return m_poseMap.at(&other);
 }
-
+/*
+void Frame::setPose(const Frame& other, Pose&& pose) {
+	m_poseMap.insert(std::make_pair<const Frame*, Pose>(&other, std::move(pose)));
+}
+*/
 bool Frame::hasKeypoints(const Frame& other) const {
   return m_keypointMap.count(&other) > 0;
 }

@@ -21,6 +21,10 @@ namespace SFM {
     Frame(size_t id, ORBDetector& detector, Features&& features, double focal,
       const cv::Vec2d& pp, int minMatches = 10);
 
+		Frame(const Frame& other);
+
+		Frame& operator=(const Frame& other);
+
     size_t id() const;
 
     bool compare(Frame& other);
@@ -34,11 +38,14 @@ namespace SFM {
 
     bool hasPose(const Frame& other) const;
     const Pose& getPose(const Frame& other) const;
+		void setPose(const Frame& other, Pose&& pose);
 
     bool hasKeypoints(const Frame& other) const;
     size_t countMatchedKeypoints(const Frame& other) const;
     const std::vector<KeypointID>& getKeypoints(const Frame& frame) const;
     cv::Point2f keypoint(KeypointID id) const;
+
+		void setKeypoints(const Frame& other, std::vector<int>&& keypoints);
 
     bool hasLandmark(KeypointID id) const;
     LandmarkID getLandmark(KeypointID id) const;

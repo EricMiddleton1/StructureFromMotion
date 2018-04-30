@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <thread>
 
+#include <mpi.h>
+
 #include <yaml-cpp/yaml.h>
 
 #include "Config.hpp"
@@ -17,242 +19,354 @@
 #include "OrbDetector.hpp"
 #include "Frame.hpp"
 #include "PointCloud.hpp"
+#include "MPI_Util.hpp"
+
+using namespace SFM;
 
 int main(void)
 {
+	int my_rank, comm_sz;
+
+	MPI_Init(NULL, NULL);
+	MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
   //Load YAML configuration file
   Config config{"config.yml"};
-  
-  //Initialize objects based on YAML configuration parameters
-  auto videoParams = config.getParams("video_device");
-  auto videoName = std::find_if(videoParams.begin(), videoParams.end(),
-    [](const auto& param) { return param.first == "name"; });
-  if(videoName == videoParams.end()) {
-    std::cerr << "[Error] Missing parameter video_device/name" << std::endl;
-    return 1;
-  }
-  auto videoDevice =
-    device_cast<VideoDevice>(DeviceManager::build(videoName->second,
-  	std::move(videoParams)));
-	
 	SFM::ORBDetector orbDetector{config.getParams("feature_detector")};
-
-  double focal = 484;
+	double focal = 484;
   cv::Point2d pp{311.9607, 219.6259};
+
+	//Local set of images
+	std::vector<cv::Mat> localImages;
+	std::vector<Frame> localFrames;
+	int totalImages;
 
   //Essential datastructures: vector of frames, point cloud
   std::vector<SFM::Frame> frames;
   SFM::PointCloud pointCloud;
 
-  std::cout << "[Info] Loading images and extracting features..." << std::endl;
+	int64_t startTime, endTime;
 
-  //Phase 1 - Load frames from disk and store in Frame datstructure
-	cv::Mat image;
-  auto startTime = cv::getTickCount();
-  for(size_t i = 0;videoDevice->getFrame(image); ++i) {
-    //Save frame
-    //This converts the frame to grayscale and
-    //extracts and stores ORB features and descriptors
-    frames.emplace_back(i, orbDetector, image, focal, pp);
-  }
+  if(my_rank == 0) {
+		//Initialize objects based on YAML configuration parameters
+		auto videoParams = config.getParams("video_device");
+		auto videoName = std::find_if(videoParams.begin(), videoParams.end(),
+			[](const auto& param) { return param.first == "name"; });
+		if(videoName == videoParams.end()) {
+			std::cerr << "[Error] Missing parameter video_device/name" << std::endl;
+			return 1;
+		}
+		auto videoDevice =
+			device_cast<VideoDevice>(DeviceManager::build(videoName->second,
+			std::move(videoParams)));
 
-  auto endTime = cv::getTickCount();
-	std::cout << "[Info] Loaded " << frames.size() << " frames ("
-    << static_cast<float>(endTime - startTime)
-		/ cv::getTickFrequency()*1000.f << "ms)" << std::endl;
+		std::cout << "[Info] Loading images from disk and scattering" << std::endl;
+		startTime = cv::getTickCount();
 
-  if(frames.empty()) {
-    std::cerr << "[Error] Loaded 0 frames" << std::endl;
-    return 1;
-  }
+		//Load images from disk
+		cv::Mat img;
+		while(videoDevice->getFrame(img)) {
+			localImages.emplace_back(img.clone());
+		}
+
+		totalImages = localImages.size();
+	}
+
+	//Broadcast image count
+	MPI_Bcast(&totalImages, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+	if(my_rank == 0) {
+		//Scatter images to processors
+		for(size_t i = 1; i < comm_sz; ++i) {
+			size_t start = i*localImages.size()/comm_sz,
+				end = (i+1)*localImages.size()/comm_sz;
+
+			std::cout << "[0] Sending image subset [" << start << ", " << end << ") to "
+				<< i << std::endl;
+
+			//MPI_Util::sendMats(localImages, start, end, i);
+			for(int j = start; j < end; ++j) {
+				MPI_Util::sendMat(localImages[j], i);
+			}
+		}
+
+		//Only keep root's local set
+		localImages.resize(localImages.size()/comm_sz);
+	}
+	else {
+		int myImageCount = (my_rank+1)*totalImages/comm_sz - my_rank*totalImages/comm_sz;
+
+		for(int i = 0; i < myImageCount; ++i) {
+			localImages.push_back(MPI_Util::recvMat(0));
+			std::cout << "[" << my_rank << "] Received image " << i << " of " << myImageCount
+				<< std::endl;
+		}
+	}
+
+
+	size_t imageOffset = my_rank*totalImages/comm_sz;
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	if(my_rank == 0) {
+		endTime = cv::getTickCount();
+
+		std::cout << static_cast<float>(endTime - startTime)*1000.f / cv::getTickFrequency()
+			<< "ms" << std::endl;
   
-  std::cout << "[Info] Tracking features between all pairs of frames" << std::endl;
-  //Phase 2 - Loop through every pair of frames to track feature correspondences accross frames
+		std::cout << "[Info] Loading images and extracting features..." << std::endl;
+	}
+
+  //Phase 1 - Extract image features
   startTime = cv::getTickCount();
-  for(size_t i = 0; i < (frames.size()-1); ++i) {
+  
+	//Extract features from local set
+	for(size_t i = 0; i < localImages.size(); ++i) {
+		localFrames.emplace_back(i+imageOffset, orbDetector, localImages[i], focal, pp);
+	}
+
+	//Send local frames to all other frames
+	for(int i = 0; i < comm_sz; ++i) {
+		if(i != my_rank) {
+			//Non-blocking
+			MPI_Util::sendFrames(localFrames, i);
+		}
+	}
+
+	//Receive frames
+	for(int i = 0; i < comm_sz; ++i) {
+		if(i == my_rank) {
+			frames.insert(frames.end(), localFrames.begin(), localFrames.end());
+			localFrames.clear();
+		}
+		else {
+			size_t count = ((i+1)*totalImages/comm_sz) - (i*totalImages/comm_sz);
+			auto received = MPI_Util::recvFrames(i, orbDetector, i*totalImages/comm_sz,
+				focal, pp);
+			frames.insert(frames.end(), received.begin(), received.end());
+		}
+	}
+
+	std::cout << "[" << my_rank << "] I have " << frames.size() << " frames" << std::endl;
+
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	if(my_rank == 0) {
+		endTime = cv::getTickCount();
+			std::cout << static_cast<float>(endTime - startTime)
+			/ cv::getTickFrequency()*1000.f << "ms)" << std::endl;
+	  std::cout << "[Info] Tracking features between all pairs of frames" << std::endl;
+
+		startTime = cv::getTickCount();
+	}
+
+  //Phase 2 - Loop through every pair of frames to track feature correspondences accross frames
+	size_t frameStart = my_rank*(totalImages-1)/comm_sz,
+		frameEnd = (my_rank+1)*(totalImages-1)/comm_sz;
+  for(size_t i = frameStart; i < frameEnd; ++i) {
     auto& frame1 = frames[i];
+
+		std::cout << "[" << my_rank << "] Calculating covisibility for frame " << i
+			<< std::endl;
 
     for(size_t j = i+1; j < frames.size(); ++j) {
-      if(frame1.compare(frames[j])) {
-      }
+      frame1.compare(frames[j]);
     }
   }
-  endTime = cv::getTickCount();
-  std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
-    << "ms" << std::endl;
 
-  //Camera Intrinsic Matrix
-  cv::Mat k = cv::Mat::eye(3, 3, CV_64F);
-  k.at<double>(0, 0) = focal;
-  k.at<double>(1, 1) = focal;
-  k.at<double>(0, 2) = pp.x;
-  k.at<double>(1, 2) = pp.y;
+	//Send covisibility information back to root
+	if(my_rank != 0) {
+		std::cout << "[" << my_rank << "] Sending covisibility edges" << std::endl;
+		MPI_Util::sendCovisibility(frames, frameStart, frameEnd);
+		std::cout << "[" << my_rank << "] Done" << std::endl;
+	}
+	else {
+		//Receive covisibility information from each node
+		std::cout << "[0] Receiving covisibility edges" << std::endl;
+		MPI_Util::recvCovisibility(frames, comm_sz);
+		std::cout << "[0] Done" << std::endl;
+	}
 
-  std::cout << "[Info] Tracking motion between pairs of adjacent frames" << std::endl;
-  //Phase 3 - Recover motion between frames and triangle keypoints 2D->3D
-  cv::Mat T = cv::Mat::eye(4, 4, CV_64F),
-    P = cv::Mat::eye(3, 4, CV_64F);
+	if(my_rank == 0) {
+		endTime = cv::getTickCount();
+		std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
+			<< "ms" << std::endl;
 
-  startTime = cv::getTickCount();
-  for(size_t i = 0; i < frames.size()-1; ++i) {
-    auto& frame1 = frames[i];
-    auto& frame2 = frames[i+1];
+		//Camera Intrinsic Matrix
+		cv::Mat k = cv::Mat::eye(3, 3, CV_64F);
+		k.at<double>(0, 0) = focal;
+		k.at<double>(1, 1) = focal;
+		k.at<double>(0, 2) = pp.x;
+		k.at<double>(1, 2) = pp.y;
 
-    if(frame1.hasKeypoints(frame2)) {
-      const auto& pose = frame1.getPose(frame2);
-      const auto& kpID1 = frame1.getKeypoints(frame2);
-      const auto& kpID2 = frame2.getKeypoints(frame1);
+		std::cout << "[Info] Tracking motion between pairs of adjacent frames" << std::endl;
+		//Phase 3 - Recover motion between frames and triangle keypoints 2D->3D
+		cv::Mat T = cv::Mat::eye(4, 4, CV_64F),
+			P = cv::Mat::eye(3, 4, CV_64F);
 
-      std::vector<cv::Point2f> points1, points2;
-      for(size_t j = 0; j < kpID1.size(); ++j) {
-        points1.push_back(frame1.keypoint(kpID1[j]));
-        points2.push_back(frame2.keypoint(kpID2[j]));
-      }
-      
-      //Perform local transform
-      cv::Mat T{cv::Mat::eye(4, 4, CV_64F)}, localR = pose.r, localT = pose.t;
-      localR.copyTo(T(cv::Range(0, 3), cv::Range(0, 3)));
-      localT.copyTo(T(cv::Range(0, 3), cv::Range(3, 4)));
+		startTime = cv::getTickCount();
+		for(size_t i = 0; i < frames.size()-1; ++i) {
+			auto& frame1 = frames[i];
+			auto& frame2 = frames[i+1];
 
-      frame2.T(frame1.T()*T);
+			if(frame1.hasKeypoints(frame2)) {
+				const auto& pose = frame1.getPose(frame2);
+				const auto& kpID1 = frame1.getKeypoints(frame2);
+				const auto& kpID2 = frame2.getKeypoints(frame1);
 
-      //Create projection matrix
-      cv::Mat r = frame2.T()(cv::Range(0, 3), cv::Range(0, 3));
-      cv::Mat t = frame2.T()(cv::Range(0, 3), cv::Range(3, 4));
-      cv::Mat P(3, 4, CV_64F);
-      
-      P(cv::Range(0, 3), cv::Range(0, 3)) = r.t();
-      P(cv::Range(0, 3), cv::Range(3, 4)) = -r.t()*t;
-      P = k*P;
-      frame2.P(P);
+				std::vector<cv::Point2f> points1, points2;
+				for(size_t j = 0; j < kpID1.size(); ++j) {
+					points1.push_back(frame1.keypoint(kpID1[j]));
+					points2.push_back(frame2.keypoint(kpID2[j]));
+				}
+				
+				//Perform local transform
+				cv::Mat T{cv::Mat::eye(4, 4, CV_64F)}, localR = pose.r, localT = pose.t;
+				localR.copyTo(T(cv::Range(0, 3), cv::Range(0, 3)));
+				localT.copyTo(T(cv::Range(0, 3), cv::Range(3, 4)));
 
-      //Triangulate points
-      cv::Mat points4d;
-      cv::triangulatePoints(frame1.P(), frame2.P(), points1, points2, points4d);
+				frame2.T(frame1.T()*T);
 
-      //Scale the triangulated points to match scale with existing 3D landmarks
-      if(i > 0) {
-        double scale = 0.;
-        size_t count = 0;
-        
-        cv::Point3f frame1Pos{
-          frame1.T().at<double>(0, 3),
-          frame1.T().at<double>(1, 3),
-          frame1.T().at<double>(2, 3)
-        };
+				//Create projection matrix
+				cv::Mat r = frame2.T()(cv::Range(0, 3), cv::Range(0, 3));
+				cv::Mat t = frame2.T()(cv::Range(0, 3), cv::Range(3, 4));
+				cv::Mat P(3, 4, CV_64F);
+				
+				P(cv::Range(0, 3), cv::Range(0, 3)) = r.t();
+				P(cv::Range(0, 3), cv::Range(3, 4)) = -r.t()*t;
+				P = k*P;
+				frame2.P(P);
 
-        //Find existing 3D landmarks that are visible in current frame2
-        std::vector<cv::Point3f> newPoints, existingPoints;
-        for(size_t j = 0; j < kpID1.size(); ++j) {
-          if(frame1.hasLandmark(kpID1[j])) {
-            cv::Point3f pt3d;
-            auto ptID = frame1.getLandmark(kpID1[j]);
-            auto avgLandmark = pointCloud.getPoint(ptID);
+				//Triangulate points
+				cv::Mat points4d;
+				cv::triangulatePoints(frame1.P(), frame2.P(), points1, points2, points4d);
 
-            pt3d.x = points4d.at<float>(0, j) / points4d.at<float>(3, j);
-            pt3d.y = points4d.at<float>(1, j) / points4d.at<float>(3, j);
-            pt3d.z = points4d.at<float>(2, j) / points4d.at<float>(3, j);
+				//Scale the triangulated points to match scale with existing 3D landmarks
+				if(i > 0) {
+					double scale = 0.;
+					size_t count = 0;
+					
+					cv::Point3f frame1Pos{
+						frame1.T().at<double>(0, 3),
+						frame1.T().at<double>(1, 3),
+						frame1.T().at<double>(2, 3)
+					};
 
-            newPoints.push_back(pt3d);
-            existingPoints.push_back(avgLandmark);
-          }
-        }
-        
-        if(newPoints.size() < 2) {
-          continue;
-        }
-        //Calculate average ratio of distance for all landmark/point matches
-        //TODO: Consider using RANSAC here if outliers are a problem
-        for(int j = 0; j < newPoints.size()-1; ++j) {
-          for(int k = j+1; k < newPoints.size(); ++k) {
-            double s = cv::norm(existingPoints[j] - existingPoints[k]) /
-              cv::norm(newPoints[j] - newPoints[k]);
+					//Find existing 3D landmarks that are visible in current frame2
+					std::vector<cv::Point3f> newPoints, existingPoints;
+					for(size_t j = 0; j < kpID1.size(); ++j) {
+						if(frame1.hasLandmark(kpID1[j])) {
+							cv::Point3f pt3d;
+							auto ptID = frame1.getLandmark(kpID1[j]);
+							auto avgLandmark = pointCloud.getPoint(ptID);
 
-            scale += s;
-            ++count;
-          }
-        }
-        //TODO: deal with possible division by zero
-        scale /= count;
+							pt3d.x = points4d.at<float>(0, j) / points4d.at<float>(3, j);
+							pt3d.y = points4d.at<float>(1, j) / points4d.at<float>(3, j);
+							pt3d.z = points4d.at<float>(2, j) / points4d.at<float>(3, j);
 
-        //Scale unit translation vector by scale factor and recalculate T, P
-        localT *= scale;
-        cv::Mat T = cv::Mat::eye(4, 4, CV_64F);
-        localR.copyTo(T(cv::Range(0, 3), cv::Range(0, 3)));
-        localT.copyTo(T(cv::Range(0, 3), cv::Range(3, 4)));
+							newPoints.push_back(pt3d);
+							existingPoints.push_back(avgLandmark);
+						}
+					}
+					
+					if(newPoints.size() < 2) {
+						continue;
+					}
+					//Calculate average ratio of distance for all landmark/point matches
+					//TODO: Consider using RANSAC here if outliers are a problem
+					for(int j = 0; j < newPoints.size()-1; ++j) {
+						for(int k = j+1; k < newPoints.size(); ++k) {
+							double s = cv::norm(existingPoints[j] - existingPoints[k]) /
+								cv::norm(newPoints[j] - newPoints[k]);
 
-        //Update global frame2 position based on rescaled T
-        //TODO: Consider also rescaling relative pose between current frame and previous frame
-        //TODO NOTE: It would be useful to calculate this relative pose and scaling factor
-        //between all covisible frames
-        frame2.T(frame1.T()*T);
+							scale += s;
+							++count;
+						}
+					}
+					//TODO: deal with possible division by zero
+					scale /= count;
 
-        //Make new projection matrix
-        //TODO: Make sure this is correct
-        r = frame2.T()(cv::Range(0, 3), cv::Range(0, 3));
-        t = frame2.T()(cv::Range(0, 3), cv::Range(3, 4));
-        cv::Mat P(3, 4, CV_64F);
-        P(cv::Range(0, 3), cv::Range(0, 3)) = r.t();
-        P(cv::Range(0, 3), cv::Range(3, 4)) = -r.t()*t;
-        P = k*P;
+					//Scale unit translation vector by scale factor and recalculate T, P
+					localT *= scale;
+					cv::Mat T = cv::Mat::eye(4, 4, CV_64F);
+					localR.copyTo(T(cv::Range(0, 3), cv::Range(0, 3)));
+					localT.copyTo(T(cv::Range(0, 3), cv::Range(3, 4)));
 
-        //Update frame2 projection matrix with correct relative scaling
-        frame2.P(P);
+					//Update global frame2 position based on rescaled T
+					//TODO: Consider also rescaling relative pose between current frame and previous frame
+					//TODO NOTE: It would be useful to calculate this relative pose and scaling factor
+					//between all covisible frames
+					frame2.T(frame1.T()*T);
 
-        //Re-triangulate points based on new projection matrix with correct relative scale
-        cv::triangulatePoints(frame1.P(), frame2.P(), points1, points2, points4d);
-      }//End of block if(i > 0)
+					//Make new projection matrix
+					//TODO: Make sure this is correct
+					r = frame2.T()(cv::Range(0, 3), cv::Range(0, 3));
+					t = frame2.T()(cv::Range(0, 3), cv::Range(3, 4));
+					cv::Mat P(3, 4, CV_64F);
+					P(cv::Range(0, 3), cv::Range(0, 3)) = r.t();
+					P(cv::Range(0, 3), cv::Range(3, 4)) = -r.t()*t;
+					P = k*P;
 
-      //Loop through matched points and update point cloud, frame landmark maps
-      for(size_t j = 0; j < kpID1.size(); ++j) {
-        cv::Point3f pt3d;
+					//Update frame2 projection matrix with correct relative scaling
+					frame2.P(P);
 
-        pt3d.x = points4d.at<float>(0, j) / points4d.at<float>(3, j);
-        pt3d.y = points4d.at<float>(1, j) / points4d.at<float>(3, j);
-        pt3d.z = points4d.at<float>(2, j) / points4d.at<float>(3, j);
+					//Re-triangulate points based on new projection matrix with correct relative scale
+					cv::triangulatePoints(frame1.P(), frame2.P(), points1, points2, points4d);
+				}//End of block if(i > 0)
 
-        if(frame1.hasLandmark(kpID1[j])) {
-          //Add existing landmark to frame2 landmark map
-          auto id = frame1.getLandmark(kpID1[j]);
-          frame2.addLandmark(kpID2[j], id);
+				//Loop through matched points and update point cloud, frame landmark maps
+				for(size_t j = 0; j < kpID1.size(); ++j) {
+					cv::Point3f pt3d;
 
-          //Add new sighting of landmark to point cloud datastructure
-          pointCloud.addSighting(id, pt3d);
-        }
-        else {
-          //This is a new landmark
+					pt3d.x = points4d.at<float>(0, j) / points4d.at<float>(3, j);
+					pt3d.y = points4d.at<float>(1, j) / points4d.at<float>(3, j);
+					pt3d.z = points4d.at<float>(2, j) / points4d.at<float>(3, j);
 
-          //Add to point cloud datastructure
-          auto id = pointCloud.addPoint(pt3d);
+					if(frame1.hasLandmark(kpID1[j])) {
+						//Add existing landmark to frame2 landmark map
+						auto id = frame1.getLandmark(kpID1[j]);
+						frame2.addLandmark(kpID2[j], id);
 
-          //Add to landmark maps for frame1, frame2
-          frame1.addLandmark(kpID1[j], id);
-          frame2.addLandmark(kpID2[j], id);
-        }
-      }
-    }
-  }
-  endTime = cv::getTickCount();
-  std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
-    << "ms" << std::endl;
-  
-  for(const auto& frame : frames) {
-    std::string name{std::string("frame") + std::to_string(frame.id())};
+						//Add new sighting of landmark to point cloud datastructure
+						pointCloud.addSighting(id, pt3d);
+					}
+					else {
+						//This is a new landmark
 
-    //Dump the results to disk
-    std::fstream fFeatures{name + "_features.csv", std::fstream::out},
-      fCovis{name + "_covisibility.csv", std::fstream::out},
-      fLandmarks{name + "_landmarks.csv", std::fstream::out},
-      fPose{name + "_pose.csv", std::fstream::out};
+						//Add to point cloud datastructure
+						auto id = pointCloud.addPoint(pt3d);
 
-    frame.writeFeatures(fFeatures);
-    frame.writeCovisibility(fCovis);
-    frame.writeLandmarks(fLandmarks);
-    frame.writePose(fPose);
-  }
+						//Add to landmark maps for frame1, frame2
+						frame1.addLandmark(kpID1[j], id);
+						frame2.addLandmark(kpID2[j], id);
+					}
+				}
+			}
+		}
+		endTime = cv::getTickCount();
+		std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
+			<< "ms" << std::endl;
+		
+		for(const auto& frame : frames) {
+			std::string name{std::string("frame") + std::to_string(frame.id())};
 
-  std::fstream fLandmarks{"landmarks.csv", std::fstream::out};
-  pointCloud.write(fLandmarks);
+			//Dump the results to disk
+			std::fstream fFeatures{name + "_features.csv", std::fstream::out},
+				fCovis{name + "_covisibility.csv", std::fstream::out},
+				fLandmarks{name + "_landmarks.csv", std::fstream::out},
+				fPose{name + "_pose.csv", std::fstream::out};
+
+			frame.writeFeatures(fFeatures);
+			frame.writeCovisibility(fCovis);
+			frame.writeLandmarks(fLandmarks);
+			frame.writePose(fPose);
+		}
+
+		std::fstream fLandmarks{"landmarks.csv", std::fstream::out};
+		pointCloud.write(fLandmarks);
+	}
+
+	MPI_Barrier(MPI_COMM_WORLD);
 
   return 0;
 }
