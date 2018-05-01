@@ -23,13 +23,24 @@
 
 using namespace SFM;
 
-int main(void)
+float cvTickToMs(int64_t start, int64_t end) {
+	return static_cast<float>(end - start) / cv::getTickFrequency() * 1000.f;
+}
+
+int main(int argc, char* argv[])
 {
 	int my_rank, comm_sz;
 
 	MPI_Init(NULL, NULL);
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
 	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
+	int cvThreads = 1;
+	if(argc == 2) {
+		cvThreads = std::stoi(argv[1]);
+	}
+
+	cv::setNumThreads(cvThreads);
 
   //Load YAML configuration file
   Config config{"config.yml"};
@@ -46,7 +57,8 @@ int main(void)
   std::vector<SFM::Frame> frames;
   SFM::PointCloud pointCloud;
 
-	int64_t startTime, endTime;
+	int64_t startTime, loadDone, loadTransferDone, featureDone, featureTransferDone,
+		covisDone, covisTransferDone, motionDone;
 
   if(my_rank == 0) {
 		//Initialize objects based on YAML configuration parameters
@@ -61,7 +73,6 @@ int main(void)
 			device_cast<VideoDevice>(DeviceManager::build(videoName->second,
 			std::move(videoParams)));
 
-		std::cout << "[Info] Loading images from disk and scattering" << std::endl;
 		startTime = cv::getTickCount();
 
 		//Load images from disk
@@ -71,6 +82,8 @@ int main(void)
 		}
 
 		totalImages = localImages.size();
+
+		loadDone = cv::getTickCount();
 	}
 
 	//Broadcast image count
@@ -81,9 +94,6 @@ int main(void)
 		for(size_t i = 1; i < comm_sz; ++i) {
 			size_t start = i*localImages.size()/comm_sz,
 				end = (i+1)*localImages.size()/comm_sz;
-
-			std::cout << "[0] Sending image subset [" << start << ", " << end << ") to "
-				<< i << std::endl;
 
 			//MPI_Util::sendMats(localImages, start, end, i);
 			for(int j = start; j < end; ++j) {
@@ -99,8 +109,6 @@ int main(void)
 
 		for(int i = 0; i < myImageCount; ++i) {
 			localImages.push_back(MPI_Util::recvMat(0));
-			std::cout << "[" << my_rank << "] Received image " << i << " of " << myImageCount
-				<< std::endl;
 		}
 	}
 
@@ -108,21 +116,20 @@ int main(void)
 	size_t imageOffset = my_rank*totalImages/comm_sz;
 	MPI_Barrier(MPI_COMM_WORLD);
 
-	if(my_rank == 0) {
-		endTime = cv::getTickCount();
 
-		std::cout << static_cast<float>(endTime - startTime)*1000.f / cv::getTickFrequency()
-			<< "ms" << std::endl;
-  
-		std::cout << "[Info] Loading images and extracting features..." << std::endl;
+	if(my_rank == 0) {
+		loadTransferDone = cv::getTickCount();
 	}
 
-  //Phase 1 - Extract image features
-  startTime = cv::getTickCount();
-  
 	//Extract features from local set
 	for(size_t i = 0; i < localImages.size(); ++i) {
 		localFrames.emplace_back(i+imageOffset, orbDetector, localImages[i], focal, pp);
+	}
+	
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	if(my_rank == 0) {
+		featureDone = cv::getTickCount();
 	}
 
 	//Send local frames to all other frames
@@ -147,17 +154,10 @@ int main(void)
 		}
 	}
 
-	std::cout << "[" << my_rank << "] I have " << frames.size() << " frames" << std::endl;
-
 	MPI_Barrier(MPI_COMM_WORLD);
-
+	
 	if(my_rank == 0) {
-		endTime = cv::getTickCount();
-			std::cout << static_cast<float>(endTime - startTime)
-			/ cv::getTickFrequency()*1000.f << "ms)" << std::endl;
-	  std::cout << "[Info] Tracking features between all pairs of frames" << std::endl;
-
-		startTime = cv::getTickCount();
+		featureTransferDone = cv::getTickCount();
 	}
 
   //Phase 2 - Loop through every pair of frames to track feature correspondences accross frames
@@ -166,31 +166,27 @@ int main(void)
   for(size_t i = frameStart; i < frameEnd; ++i) {
     auto& frame1 = frames[i];
 
-		std::cout << "[" << my_rank << "] Calculating covisibility for frame " << i
-			<< std::endl;
-
     for(size_t j = i+1; j < frames.size(); ++j) {
       frame1.compare(frames[j]);
     }
   }
 
+	MPI_Barrier(MPI_COMM_WORLD);
+	if(my_rank == 0) {
+		covisDone = cv::getTickCount();
+	}
+
 	//Send covisibility information back to root
 	if(my_rank != 0) {
-		std::cout << "[" << my_rank << "] Sending covisibility edges" << std::endl;
 		MPI_Util::sendCovisibility(frames, frameStart, frameEnd);
-		std::cout << "[" << my_rank << "] Done" << std::endl;
 	}
 	else {
 		//Receive covisibility information from each node
-		std::cout << "[0] Receiving covisibility edges" << std::endl;
 		MPI_Util::recvCovisibility(frames, comm_sz);
-		std::cout << "[0] Done" << std::endl;
 	}
 
 	if(my_rank == 0) {
-		endTime = cv::getTickCount();
-		std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
-			<< "ms" << std::endl;
+		covisTransferDone = cv::getTickCount();
 
 		//Camera Intrinsic Matrix
 		cv::Mat k = cv::Mat::eye(3, 3, CV_64F);
@@ -199,12 +195,10 @@ int main(void)
 		k.at<double>(0, 2) = pp.x;
 		k.at<double>(1, 2) = pp.y;
 
-		std::cout << "[Info] Tracking motion between pairs of adjacent frames" << std::endl;
 		//Phase 3 - Recover motion between frames and triangle keypoints 2D->3D
 		cv::Mat T = cv::Mat::eye(4, 4, CV_64F),
 			P = cv::Mat::eye(3, 4, CV_64F);
 
-		startTime = cv::getTickCount();
 		for(size_t i = 0; i < frames.size()-1; ++i) {
 			auto& frame1 = frames[i];
 			auto& frame2 = frames[i+1];
@@ -343,9 +337,7 @@ int main(void)
 				}
 			}
 		}
-		endTime = cv::getTickCount();
-		std::cout << static_cast<float>(endTime - startTime) / cv::getTickFrequency()*1000.f
-			<< "ms" << std::endl;
+		motionDone = cv::getTickCount();
 		
 		for(const auto& frame : frames) {
 			std::string name{std::string("frame") + std::to_string(frame.id())};
@@ -364,6 +356,15 @@ int main(void)
 
 		std::fstream fLandmarks{"landmarks.csv", std::fstream::out};
 		pointCloud.write(fLandmarks);
+
+		std::cout << comm_sz << ", " << cvThreads << ", "
+			<< cvTickToMs(startTime, loadDone) << ", "
+			<< cvTickToMs(loadDone, loadTransferDone) << ", "
+			<< cvTickToMs(loadTransferDone, featureDone) << ", "
+			<< cvTickToMs(featureDone, featureTransferDone) << ", "
+			<< cvTickToMs(featureTransferDone, covisDone) << ", "
+			<< cvTickToMs(covisDone, covisTransferDone) << ", "
+			<< cvTickToMs(covisTransferDone, motionDone) << std::endl;
 	}
 
 	MPI_Barrier(MPI_COMM_WORLD);

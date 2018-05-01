@@ -12,7 +12,7 @@ PI_SRC_PATH = pi
 # Space-separated pkg-config libraries used by this project
 LIBS = 
 # General compiler flags
-COMPILE_FLAGS = -O3 -std=c++14 -Wall -Wextra -pedantic -fopenmp -g
+COMPILE_FLAGS = -std=c++14 -Wall -Wextra -pedantic -fopenmp -g
 # Additional release-specific flags
 RCOMPILE_FLAGS = -D NDEBUG
 # Additional debug-specific flags
@@ -20,7 +20,7 @@ DCOMPILE_FLAGS = -D DEBUG
 # Add additional include paths
 INCLUDES = -I $(SRC_PATH) -I$(HOME)/opencv/include -I$(HOME)/yaml-cpp/include
 # General linker settings
-LINK_FLAGS = -O3 -L$(HOME)/opencv/lib64 -L$(HOME)/yaml-cpp/build -fopenmp -lyaml-cpp -lopencv_dnn -lopencv_ml -lopencv_objdetect -lopencv_shape -lopencv_stitching -lopencv_superres -lopencv_videostab -lopencv_calib3d -lopencv_features2d -lopencv_highgui -lopencv_videoio -lopencv_imgcodecs -lopencv_video -lopencv_photo -lopencv_imgproc -lopencv_flann -lopencv_core
+LINK_FLAGS = -L$(HOME)/opencv/lib64 -L$(HOME)/yaml-cpp/build -fopenmp -lyaml-cpp -lopencv_dnn -lopencv_ml -lopencv_objdetect -lopencv_shape -lopencv_stitching -lopencv_superres -lopencv_videostab -lopencv_calib3d -lopencv_features2d -lopencv_highgui -lopencv_videoio -lopencv_imgcodecs -lopencv_video -lopencv_photo -lopencv_imgproc -lopencv_flann -lopencv_core
 PI_LINK_FLAGS = -lraspicam -lraspicam_cv
 # Additional release-specific linker settings
 RLINK_FLAGS =

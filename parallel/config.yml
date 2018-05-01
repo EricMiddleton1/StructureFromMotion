@@ -1,9 +1,9 @@
 video_device:
   name:           image_folder
-  folder_path:    ../images/desk2
-#  color_mode:     bw
+  folder_path:    ../images/coover
+  color_mode:     bw
   max_height:     1080
-#  max frames:     20
+  max frames:     64
   visualizer:     false
 
 feature_detector:
